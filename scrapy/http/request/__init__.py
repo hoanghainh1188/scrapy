@@ -252,6 +252,8 @@ class Request(object_ref):
         self.errback: Callable[[Failure], Any] | None = errback
 
         self._cookies: CookiesT | None = cookies or None
+        # Copied into a Headers object so later changes to the caller's
+        # mapping do not leak into this request.
         self._headers: Headers | None = (
             Headers(headers, encoding=encoding) if headers else None
         )
