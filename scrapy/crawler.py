@@ -8,7 +8,7 @@ import signal
 import warnings
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from twisted.internet.defer import Deferred, DeferredList, inlineCallbacks
 
@@ -363,7 +363,10 @@ class CrawlerRunnerBase(ABC):
         """
         Return a :class:`~scrapy.crawler.Crawler` object.
 
-        * If ``crawler_or_spidercls`` is a Crawler, it is returned as-is.
+        * If ``crawler_or_spidercls`` is a Crawler, it is returned, after
+          using the settings of this object as defaults for its settings:
+          settings of the crawler are only overridden by settings of this
+          object that have a higher priority.
         * If ``crawler_or_spidercls`` is a Spider subclass, a new Crawler
           is constructed for it.
         * If ``crawler_or_spidercls`` is a string, this function finds
@@ -376,8 +379,19 @@ class CrawlerRunnerBase(ABC):
                 "it must be a spider class (or a Crawler object)"
             )
         if isinstance(crawler_or_spidercls, Crawler):
+            self._merge_settings_into(crawler_or_spidercls)
             return crawler_or_spidercls
         return self._create_crawler(crawler_or_spidercls)
+
+    def _merge_settings_into(self, crawler: Crawler) -> None:
+        if crawler.settings.frozen:
+            return
+        for name, value in self.settings.copy().items():
+            priority = cast("int", self.settings.getpriority(name))
+            current = crawler.settings.getpriority(name)
+            if current is None or priority > current:
+                crawler.settings.set(name, value, priority)
+        crawler._update_root_log_handler()
 
     def _create_crawler(self, spidercls: str | type[Spider]) -> Crawler:
         if isinstance(spidercls, str):
