@@ -18,6 +18,7 @@ from service_identity.pyopenssl import (
     verify_hostname,
     verify_ip_address,
 )
+from twisted.internet import _sslverify
 from twisted.internet._sslverify import ClientTLSOptions
 from twisted.internet.ssl import AcceptableCiphers, TLSVersion
 
@@ -73,6 +74,33 @@ _TWISTED_VERSION_MAP: dict[str, TLSVersion] = {
     "TLSv1.2": TLSVersion.TLSv1_2,
     "TLSv1.3": TLSVersion.TLSv1_3,
 }
+
+
+def _patch_twisted_idna_bytes() -> None:
+    """Make Twisted accept A-labels that the ``idna`` package rejects.
+
+    Twisted encodes the TLS hostname with ``idna.encode()``, which implements
+    strict IDNA 2008 and raises :exc:`idna.InvalidCodepoint` even for valid
+    punycode hostnames like ``xn--i-7iq.ws`` (``i❤.ws``), because they decode to
+    characters like emoji. Browsers accept such domains, so fall back to
+    Python's IDNA 2003 codec, which passes ASCII hostnames through.
+    """
+    original = getattr(_sslverify, "_idnaBytes", None)
+    if original is None or getattr(original, "_scrapy_lenient", False):
+        return
+
+    def _lenient_idna_bytes(text: str) -> bytes:
+        try:
+            result: bytes = original(text)
+        except UnicodeError:
+            return text.encode("idna")
+        return result
+
+    _lenient_idna_bytes._scrapy_lenient = True  # type: ignore[attr-defined]
+    _sslverify._idnaBytes = _lenient_idna_bytes  # type: ignore[attr-defined]
+
+
+_patch_twisted_idna_bytes()
 
 
 class _ScrapyClientTLSOptions(ClientTLSOptions):
