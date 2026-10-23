@@ -157,7 +157,7 @@ class ScrapyPriorityQueue:
                     q.close()
                     self.changed = True
 
-        self.curprio = min(startprios)
+        self._update_curprio()
 
     def qfactory(self, key: int) -> QueueProtocol:
         return build_from_crawler(
@@ -206,8 +206,7 @@ class ScrapyPriorityQueue:
                     del self.queues[self.curprio]
                     q.close()
                     self.changed = True
-                    if not self._start_queues:
-                        self._update_curprio()
+                    self._update_curprio()
                 return m
             if self._start_queues:
                 try:
