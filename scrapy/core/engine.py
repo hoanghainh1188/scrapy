@@ -71,6 +71,9 @@ class _Slot:
     ) -> None:
         self.closing: Deferred[None] | None = None
         self.inprogress: set[Request] = set()
+        # Number of items from start() that are being processed by the item
+        # pipelines.
+        self.start_items_inprogress: int = 0
         self.close_if_idle: bool = close_if_idle
         self.nextcall: CallLaterOnce[None] = nextcall
         self.scheduler: BaseScheduler = scheduler
@@ -85,13 +88,25 @@ class _Slot:
         self.inprogress.remove(request)
         self._maybe_fire_closing()
 
+    def add_start_item(self) -> None:
+        self.start_items_inprogress += 1
+
+    def remove_start_item(self) -> None:
+        self.start_items_inprogress -= 1
+        self._maybe_fire_closing()
+
     async def close(self) -> None:
         self.closing = Deferred()
         self._maybe_fire_closing()
         await maybe_deferred_to_future(self.closing)
 
     def _maybe_fire_closing(self) -> None:
-        if self.closing is not None and not self.inprogress:
+        if (
+            self.closing is not None
+            and not self.closing.called
+            and not self.inprogress
+            and not self.start_items_inprogress
+        ):
             if self.nextcall:
                 self.nextcall.cancel()
                 if self.heartbeat.running:
@@ -307,10 +322,20 @@ class ExecutionEngine:
                 self.crawl(item_or_request)
             else:
                 assert self._slot is not None
-                _schedule_coro(
-                    self.scraper.start_itemproc_async(item_or_request, response=None)
-                )
+                self._slot.add_start_item()
+                _schedule_coro(self._process_start_item(item_or_request, self._slot))
                 self._slot.nextcall.schedule()
+
+    async def _process_start_item(self, item: Any, slot: _Slot) -> None:
+        """Send an item from Spider.start() to the item pipelines, tracking it
+        in *slot* so that the spider is not closed before it is processed."""
+        try:
+            await self.scraper.start_itemproc_async(item, response=None)
+        finally:
+            slot.remove_start_item()
+            if slot.closing is None:
+                # Give the engine a chance to notice that the spider is idle.
+                slot.nextcall.schedule()
 
     async def _start_request_processing(self) -> None:
         """Starts consuming Spider.start() output and sending scheduled
@@ -443,6 +468,8 @@ class ExecutionEngine:
         if self.downloader.active:  # downloader has pending requests
             return False
         if self._start is not None:  # not all start requests are handled
+            return False
+        if self._slot.start_items_inprogress:  # start items are being processed
             return False
         return not self._slot.scheduler.has_pending_requests()
 
