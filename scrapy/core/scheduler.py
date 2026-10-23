@@ -413,20 +413,44 @@ class Scheduler(BaseScheduler):
         self.stats.inc_value("scheduler/enqueued")
         return True
 
+    def _dq_has_priority(self) -> bool:
+        """Return ``True`` if the disk queue holds a request with a strictly
+        higher priority than any request in the memory queue.
+
+        Priority queues that do not expose their current priority are
+        considered to have the same priority, in which case the memory queue
+        takes precedence.
+        """
+        if self.dqs is None:
+            return False
+        dq_prio = getattr(self.dqs, "curprio", None)
+        mq_prio = getattr(self.mqs, "curprio", None)
+        if dq_prio is None or mq_prio is None:
+            return False
+        # Priority queues store negated priorities: lower is higher priority.
+        return bool(dq_prio < mq_prio)
+
     def next_request(self) -> Request | None:
         """
-        Return a :class:`~scrapy.Request` object from the memory queue,
-        falling back to the disk queue if the memory queue is empty.
+        Return the :class:`~scrapy.Request` object with the highest priority
+        from the memory and disk queues. If both queues hold requests with the
+        same priority, the memory queue takes precedence.
         Return ``None`` if there are no more enqueued requests.
 
         Increment the appropriate stats, such as: :stat:`scheduler/dequeued`,
         :stat:`scheduler/dequeued/disk`, :stat:`scheduler/dequeued/memory`.
         """
-        request: Request | None = self.mqs.pop()
         assert self.stats is not None
-        if request is not None:
-            self.stats.inc_value("scheduler/dequeued/memory")
-        else:
+        request: Request | None = None
+        if self._dq_has_priority():
+            request = self._dqpop()
+            if request is not None:
+                self.stats.inc_value("scheduler/dequeued/disk")
+        if request is None:
+            request = self.mqs.pop()
+            if request is not None:
+                self.stats.inc_value("scheduler/dequeued/memory")
+        if request is None:
             request = self._dqpop()
             if request is not None:
                 self.stats.inc_value("scheduler/dequeued/disk")
