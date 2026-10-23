@@ -11,7 +11,7 @@ import hashlib
 import warnings
 from contextlib import suppress
 from io import BytesIO
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from itemadapter import ItemAdapter
 
@@ -32,7 +32,9 @@ if TYPE_CHECKING:
     from typing_extensions import Self
 
     from scrapy.crawler import Crawler
+    from scrapy.pipelines.files import GCSFilesStore, S3FilesStore
     from scrapy.pipelines.media import FileInfoOrError, MediaPipeline
+    from scrapy.settings import BaseSettings
 
 
 class ImageException(FileException):
@@ -115,6 +117,19 @@ class ImagesPipeline(FilesPipeline):
         cls._update_stores(settings)
         store_uri = settings["IMAGES_STORE"]
         return cls(store_uri, crawler=crawler)
+
+    @classmethod
+    def _update_stores(cls, settings: BaseSettings) -> None:
+        super()._update_stores(settings)
+        s3store: type[S3FilesStore] = cast(
+            "type[S3FilesStore]", cls.STORE_SCHEMES["s3"]
+        )
+        s3store.POLICY = settings["IMAGES_STORE_S3_ACL"]
+
+        gcs_store: type[GCSFilesStore] = cast(
+            "type[GCSFilesStore]", cls.STORE_SCHEMES["gs"]
+        )
+        gcs_store.POLICY = settings["IMAGES_STORE_GCS_ACL"] or None
 
     async def file_downloaded(
         self,
