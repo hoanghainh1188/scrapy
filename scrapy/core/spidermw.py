@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator, Callable, Coroutine, Iterable
+from contextlib import suppress
 from functools import wraps
 from inspect import isasyncgenfunction, iscoroutine
 from itertools import islice
@@ -108,9 +109,21 @@ class SpiderMiddlewareManager(MiddlewareManager):
             async for r in iterable:
                 yield r
         except Exception as ex:
-            exception_result: MutableAsyncChain[_T] = self._process_spider_exception(
-                response, ex, exception_processor_index
-            )
+            if getattr(ex, "_scrapy_spider_exception_processed", False):
+                # the whole process_spider_exception chain has already seen
+                # this exception and let it propagate
+                raise
+            try:
+                exception_result: MutableAsyncChain[_T] = (
+                    self._process_spider_exception(
+                        response, ex, exception_processor_index
+                    )
+                )
+            except Exception as ex2:
+                if ex2 is ex:
+                    with suppress(AttributeError):
+                        ex._scrapy_spider_exception_processed = True  # type: ignore[attr-defined]
+                raise
             recover_to.extend(exception_result)
 
     def _process_spider_exception(
