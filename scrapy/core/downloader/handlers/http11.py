@@ -517,6 +517,15 @@ class _ScrapyAgent:
         headers.update(response.headers.getAllRawHeaders())
         return headers
 
+    @staticmethod
+    def _add_connection_info(result: _ResultT, txresponse: TxResponse) -> None:
+        # _ResponseReader.connectionMade() is not called for responses without
+        # a body (or when the download is stopped early), so use the
+        # certificate and the IP address recorded by
+        # _LenientHTTP11ClientProtocol instead.
+        result["certificate"] = getattr(txresponse, "_scrapy_certificate", None)
+        result["ip_address"] = getattr(txresponse, "_scrapy_ip_address", None)
+
     def _cb_bodyready(
         self, txresponse: TxResponse, request: Request
     ) -> _ResultT | Deferred[_ResultT]:
@@ -527,18 +536,22 @@ class _ScrapyAgent:
             headers=self._headers_from_twisted_response(txresponse),
             body_length=txresponse.length,
         ):
-            txresponse._transport.stopProducing()
-            txresponse._transport.loseConnection()
-            return {
+            result: _ResultT = {
                 "txresponse": txresponse,
                 "stop_download": stop_download,
             }
+            self._add_connection_info(result, txresponse)
+            txresponse._transport.stopProducing()
+            txresponse._transport.loseConnection()
+            return result
 
         # deliverBody hangs for responses without body
         if cast("int", txresponse.length) == 0:
-            return {
+            result = {
                 "txresponse": txresponse,
             }
+            self._add_connection_info(result, txresponse)
+            return result
 
         maxsize = request.meta.get("download_maxsize", self._maxsize)
         warnsize = request.meta.get("download_warnsize", self._warnsize)
@@ -811,7 +824,24 @@ class _LenientHTTP11ClientProtocol(HTTP11ClientProtocol):
         # creates a parser.
         assert self._parser is not None
         self._parser.__class__ = _LenientHTTPClientParser
+        d.addCallback(self._add_connection_info)
         return d
+
+    def _add_connection_info(self, response: IResponse) -> IResponse:
+        # Responses without a body are finished, and their transport proxy is
+        # detached from the connection, before the agent returns them, so
+        # store the connection details on the response while they are still
+        # available. See https://github.com/scrapy/scrapy/issues/4466
+        certificate: ssl.Certificate | None = None
+        ip_address: ipaddress.IPv4Address | ipaddress.IPv6Address | None = None
+        with suppress(AttributeError):
+            certificate = ssl.Certificate(self.transport.getPeerCertificate())  # type: ignore[union-attr]
+        with suppress(AttributeError, ValueError):
+            ip_address = ipaddress.ip_address(self.transport.getPeer().host)  # type: ignore[union-attr]
+        response_any = cast("Any", response)
+        response_any._scrapy_certificate = certificate
+        response_any._scrapy_ip_address = ip_address
+        return response
 
 
 class _LenientHTTP11ClientFactory(_HTTP11ClientFactory):
