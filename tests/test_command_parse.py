@@ -83,6 +83,16 @@ class AsyncDefAsyncioGenExcSpider(BaseSpider):
             if i > 5:
                 raise ValueError("Stopping the processing")
 
+class RetrySpider(BaseSpider):
+    name = "retry_request"
+
+    async def parse(self, response):
+        if response.meta.get("retried"):
+            yield {{"done": True}}
+            return
+        response.meta["retried"] = True
+        yield response.request.replace(dont_filter=True)
+
 class CallbackSignatureDownloaderMiddleware:
     def process_request(self, request, spider):
         from inspect import signature
@@ -368,6 +378,21 @@ ITEM_PIPELINES = {{'{self.project_name}.pipelines.MyPipeline': 1}}
             cwd=proj_path,
         )
         assert "[{}, {'foo': 'bar'}]" in out
+
+    def test_retry_request_without_callback(
+        self, proj_path: Path, mockserver: MockServer
+    ) -> None:
+        _, out, stderr = proc(
+            "parse",
+            "--spider",
+            "retry_request",
+            "-d",
+            "2",
+            mockserver.url("/html"),
+            cwd=proj_path,
+        )
+        assert "RecursionError" not in stderr
+        assert "{'done': True}" in out
 
     def test_parse_items_no_callback_passed(
         self, proj_path: Path, mockserver: MockServer
