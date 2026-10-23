@@ -91,6 +91,11 @@ def test_invalid_reversed_portrange() -> None:
         console.start_listening()
 
 
+def test_stop_listening_without_start_listening() -> None:
+    console = TelnetConsole(_get_crawler())
+    console.stop_listening()  # must not raise AttributeError
+
+
 @coroutine_test
 async def test_telnet_vars() -> None:
     """Log into the console of a running crawl, which is when the telnet
