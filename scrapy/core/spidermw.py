@@ -6,6 +6,7 @@ See documentation in docs/topics/spider-middleware.rst
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import AsyncIterator, Callable, Coroutine, Iterable
 from functools import wraps
@@ -108,9 +109,21 @@ class SpiderMiddlewareManager(MiddlewareManager):
             async for r in iterable:
                 yield r
         except Exception as ex:
-            exception_result: MutableAsyncChain[_T] = self._process_spider_exception(
-                response, ex, exception_processor_index
-            )
+            if getattr(ex, "_scrapy_spider_exception_processed", False):
+                # No process_spider_exception method recovered from this
+                # exception already, and the methods that this layer would
+                # call were already called for it by a previous layer.
+                raise
+            try:
+                exception_result: MutableAsyncChain[_T] = (
+                    self._process_spider_exception(
+                        response, ex, exception_processor_index
+                    )
+                )
+            except Exception:
+                with contextlib.suppress(AttributeError):
+                    ex._scrapy_spider_exception_processed = True  # type: ignore[attr-defined]
+                raise
             recover_to.extend(exception_result)
 
     def _process_spider_exception(
