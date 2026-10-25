@@ -953,8 +953,7 @@ class TestS3FilesStore:
         key = "export.csv"
         uri = f"s3://{bucket}/{key}"
         checksum = "3187896a9657a28163abb31667df64c8"
-        # S3FilesStore needs to be fixed to emit tz-aware datetimes
-        last_modified = datetime(2019, 12, 1)  # noqa: DTZ001
+        last_modified = datetime(2019, 12, 1, tzinfo=timezone.utc)
 
         store = S3FilesStore(uri)
         from botocore.stub import Stubber  # noqa: PLC0415
@@ -1119,7 +1118,7 @@ class TestGCSFilesStore:
         bucket.get_blob.assert_called_once_with("my_prefix/full/filename")
         assert stat == {
             "checksum": checksum,
-            "last_modified": time.mktime(updated.timetuple()),
+            "last_modified": updated.timestamp(),
         }
 
     @coroutine_test
