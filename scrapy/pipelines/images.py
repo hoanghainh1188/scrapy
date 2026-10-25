@@ -113,6 +113,9 @@ class ImagesPipeline(FilesPipeline):
     def from_crawler(cls, crawler: Crawler) -> Self:
         settings = crawler.settings
         cls._update_stores(settings)
+        # _update_stores() applies the FILES_STORE_*_ACL settings, override them
+        cls.STORE_SCHEMES["s3"].POLICY = settings["IMAGES_STORE_S3_ACL"]  # type: ignore[attr-defined]
+        cls.STORE_SCHEMES["gs"].POLICY = settings["IMAGES_STORE_GCS_ACL"] or None  # type: ignore[attr-defined]
         store_uri = settings["IMAGES_STORE"]
         return cls(store_uri, crawler=crawler)
 
