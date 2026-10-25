@@ -8,7 +8,7 @@ import signal
 import warnings
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from twisted.internet.defer import Deferred, DeferredList, inlineCallbacks
 
@@ -357,13 +357,28 @@ class CrawlerRunnerBase(ABC):
         :meth:`crawl` and managed by this class."""
         return self._crawlers
 
+    def _apply_defaults_to_crawler(self, crawler: Crawler) -> None:
+        """Use the settings of this object as defaults for *crawler*: they are
+        applied only where the crawler has no setting, or has one with a lower
+        priority."""
+        if crawler.settings.frozen:
+            return
+        for name, value in self.settings.items():
+            priority = cast("int", self.settings.getpriority(name))
+            current = crawler.settings.getpriority(name)
+            if current is None or priority > current:
+                crawler.settings.set(name, value, priority)
+
     def create_crawler(
         self, crawler_or_spidercls: type[Spider] | str | Crawler
     ) -> Crawler:
         """
         Return a :class:`~scrapy.crawler.Crawler` object.
 
-        * If ``crawler_or_spidercls`` is a Crawler, it is returned as-is.
+        * If ``crawler_or_spidercls`` is a Crawler, it is returned as-is, after
+          using the settings of this object as defaults for it (settings
+          already defined in the crawler with the same or a higher priority
+          are kept).
         * If ``crawler_or_spidercls`` is a Spider subclass, a new Crawler
           is constructed for it.
         * If ``crawler_or_spidercls`` is a string, this function finds
@@ -376,6 +391,7 @@ class CrawlerRunnerBase(ABC):
                 "it must be a spider class (or a Crawler object)"
             )
         if isinstance(crawler_or_spidercls, Crawler):
+            self._apply_defaults_to_crawler(crawler_or_spidercls)
             return crawler_or_spidercls
         return self._create_crawler(crawler_or_spidercls)
 
