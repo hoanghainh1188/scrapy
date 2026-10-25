@@ -139,6 +139,8 @@ class HttpCacheMiddleware:
 
         if self.policy.is_cached_response_valid(cachedresponse, response, request):
             self.stats.inc_value("httpcache/revalidate")
+            if response.status == 304:
+                self._freshen_cached_response(cachedresponse, response, request)
             return cachedresponse
 
         self.stats.inc_value("httpcache/invalidate")
@@ -163,3 +165,34 @@ class HttpCacheMiddleware:
             self.storage.store_response(self.crawler.spider, request, response)
         else:
             self.stats.inc_value("httpcache/uncacheable")
+
+    def _freshen_cached_response(
+        self, cachedresponse: Response, response: Response, request: Request
+    ) -> None:
+        """Update the stored response with a 304 response, as required by
+        RFC 7234 section 4.3.4, and store it again so that its timestamp is
+        refreshed."""
+        headers = cachedresponse.headers
+        # Drop 1xx warnings and the Age of the previous validation unless the
+        # 304 response provides new ones.
+        if b"Age" not in response.headers:
+            headers.pop(b"Age", None)
+        warnings = [
+            w for w in headers.getlist(b"Warning") if not w.strip().startswith(b"1")
+        ]
+        if warnings:
+            headers[b"Warning"] = warnings
+        else:
+            headers.pop(b"Warning", None)
+        for name in response.headers:
+            if name.lower() == b"content-length":
+                continue
+            headers[name] = response.headers.getlist(name)
+        try:
+            self.storage.store_response(self.crawler.spider, request, cachedresponse)
+        except Exception:
+            logger.warning(
+                f"Could not update the cache entry for {request}.",
+                exc_info=True,
+                extra={"spider": self.crawler.spider},
+            )
