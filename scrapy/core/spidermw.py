@@ -241,6 +241,23 @@ class SpiderMiddlewareManager(MiddlewareManager):  # pylint: disable=abstract-me
             await _process_pending_io()
             return self._process_spider_exception(response, ex)
 
+    async def process_errback_output_async(
+        self,
+        output: Iterable[_T] | AsyncIterator[_T],
+        request: Request,
+    ) -> MutableAsyncChain[_T]:
+        """Pass the output of a request errback called after a download error
+        through the ``process_spider_output()`` chain.
+
+        As there is no response, an empty one built from the request is passed
+        to the spider middlewares.
+        """
+        response = Response(url=request.url, request=request)
+        ait = (
+            output if isinstance(output, AsyncIterator) else as_async_generator(output)
+        )
+        return await self._process_callback_output(response, ait)
+
     async def process_start(
         self, spider: Spider | None = None
     ) -> AsyncIterator[Any] | None:
