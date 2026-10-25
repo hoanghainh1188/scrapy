@@ -296,7 +296,13 @@ class Command(BaseRunSpiderCommand):
         if depth < opts.depth:
             for req in requests:
                 req.meta["_depth"] = depth + 1
-                req.meta["_callback"] = req.callback
+                if req.callback is not callback:
+                    req.meta["_callback"] = req.callback
+                else:
+                    # The request was derived from a previous response
+                    # (e.g. response.request.replace()), so its callback is
+                    # already ours and the original one is in its meta.
+                    req.meta.setdefault("_callback", None)
                 req.callback = callback
             scraped_data += requests
 
