@@ -413,16 +413,37 @@ class Scheduler(BaseScheduler):
         self.stats.inc_value("scheduler/enqueued")
         return True
 
+    def _dq_has_priority(self) -> bool:
+        """Return ``True`` if the next request of the disk queue has a strictly
+        higher priority than the next request of the memory queue.
+
+        If that cannot be determined (e.g. because one of the queues does not
+        implement ``peek``), return ``False``, i.e. the memory queue goes first.
+        """
+        if self.dqs is None or not len(self.dqs) or not len(self.mqs):
+            return False
+        try:
+            mq_request = self.mqs.peek()
+            dq_request = self.dqs.peek()
+        except NotImplementedError:
+            return False
+        if mq_request is None or dq_request is None:
+            return False
+        return dq_request.priority > mq_request.priority
+
     def next_request(self) -> Request | None:
         """
-        Return a :class:`~scrapy.Request` object from the memory queue,
-        falling back to the disk queue if the memory queue is empty.
-        Return ``None`` if there are no more enqueued requests.
+        Return a :class:`~scrapy.Request` object from the memory queue or the
+        disk queue, whichever has the next request with the highest priority
+        (the memory queue wins ties, and is used if the priorities cannot be
+        compared). Return ``None`` if there are no more enqueued requests.
 
         Increment the appropriate stats, such as: :stat:`scheduler/dequeued`,
         :stat:`scheduler/dequeued/disk`, :stat:`scheduler/dequeued/memory`.
         """
-        request: Request | None = self.mqs.pop()
+        request: Request | None = None
+        if not self._dq_has_priority():
+            request = self.mqs.pop()
         assert self.stats is not None
         if request is not None:
             self.stats.inc_value("scheduler/dequeued/memory")
