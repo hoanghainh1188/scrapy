@@ -55,6 +55,7 @@ class TelnetConsole(protocol.ServerFactory):
         self.portrange: list[int] = [
             int(x) for x in crawler.settings.getlist("TELNETCONSOLE_PORT")
         ]
+        self.port: Port | None = None
         self.host: str = crawler.settings["TELNETCONSOLE_HOST"]
         self.username: str = crawler.settings["TELNETCONSOLE_USERNAME"]
         self.password: str = crawler.settings["TELNETCONSOLE_PASSWORD"]
@@ -71,7 +72,7 @@ class TelnetConsole(protocol.ServerFactory):
         return cls(crawler)
 
     def start_listening(self) -> None:
-        self.port: Port = listen_tcp(self.portrange, self.host, self)
+        self.port = listen_tcp(self.portrange, self.host, self)
         h = self.port.getHost()
         logger.info(
             "Telnet console listening on %(host)s:%(port)d",
@@ -80,7 +81,8 @@ class TelnetConsole(protocol.ServerFactory):
         )
 
     def stop_listening(self) -> None:
-        self.port.stopListening()
+        if self.port is not None:
+            self.port.stopListening()
 
     def protocol(self) -> telnet.TelnetTransport:
         class Portal:
