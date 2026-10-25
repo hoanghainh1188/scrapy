@@ -716,14 +716,7 @@ class TestCrawlSpider:
         "url",
         [
             "/echo?body=test",
-            pytest.param(
-                "/status?n=200",
-                marks=pytest.mark.xfail(
-                    'config.getoption("--reactor") != "none"',
-                    reason="With HTTP11DownloadHandler, responses with no body are returned early and contain no certificate",
-                    strict=True,
-                ),
-            ),
+            "/status?n=200",
         ],
     )
     @coroutine_test
@@ -748,14 +741,7 @@ class TestCrawlSpider:
         "url",
         [
             "/echo?body=test",
-            pytest.param(
-                "/status?n=200",
-                marks=pytest.mark.xfail(
-                    'config.getoption("--reactor") != "none"',
-                    reason="With HTTP11DownloadHandler, responses with no body are returned early and contain no ip_address",
-                    strict=True,
-                ),
-            ),
+            "/status?n=200",
         ],
     )
     @coroutine_test

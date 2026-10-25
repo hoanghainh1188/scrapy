@@ -536,9 +536,15 @@ class _ScrapyAgent:
 
         # deliverBody hangs for responses without body
         if cast("int", txresponse.length) == 0:
-            return {
-                "txresponse": txresponse,
-            }
+            result: _ResultT = {"txresponse": txresponse}
+            # _ResponseReader.connectionMade() is never called in this case, so
+            # get the certificate and the IP address here.
+            transport = getattr(txresponse, "_scrapy_connection_transport", None)
+            with suppress(AttributeError):
+                result["certificate"] = ssl.Certificate(transport.getPeerCertificate())
+            with suppress(AttributeError):
+                result["ip_address"] = ipaddress.ip_address(transport.getPeer().host)
+            return result
 
         maxsize = request.meta.get("download_maxsize", self._maxsize)
         warnsize = request.meta.get("download_warnsize", self._warnsize)
@@ -811,7 +817,18 @@ class _LenientHTTP11ClientProtocol(HTTP11ClientProtocol):
         # creates a parser.
         assert self._parser is not None
         self._parser.__class__ = _LenientHTTPClientParser
+        # Twisted stops proxying response._transport to the connection
+        # transport as soon as the response is complete, which, for responses
+        # without a body, happens before the response is returned. Keep a
+        # reference to the connection transport so that the certificate and
+        # the IP address can still be read in that case.
+        d.addCallback(self._set_connection_transport, self.transport)
         return d
+
+    @staticmethod
+    def _set_connection_transport(response: IResponse, transport: Any) -> IResponse:
+        response._scrapy_connection_transport = transport  # type: ignore[attr-defined]
+        return response
 
 
 class _LenientHTTP11ClientFactory(_HTTP11ClientFactory):
