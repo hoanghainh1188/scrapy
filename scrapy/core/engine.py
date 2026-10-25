@@ -127,6 +127,9 @@ class ExecutionEngine:
         # Whether Spider.start() raised, i.e. some start items or requests may
         # never have reached the engine.
         self._start_error: bool = False
+        # Number of items from Spider.start() still being processed by item
+        # pipelines.
+        self._start_items_in_progress: int = 0
         self._closewait: Deferred[None] | None = None
         self._start_request_processing_awaitable: (
             asyncio.Future[None] | Deferred[None] | None
@@ -307,10 +310,21 @@ class ExecutionEngine:
                 self.crawl(item_or_request)
             else:
                 assert self._slot is not None
-                _schedule_coro(
-                    self.scraper.start_itemproc_async(item_or_request, response=None)
-                )
+                self._start_items_in_progress += 1
+                _schedule_coro(self._process_start_item(item_or_request))
                 self._slot.nextcall.schedule()
+
+    async def _process_start_item(self, item: Any) -> None:
+        """Sends an item from Spider.start() to item pipelines, keeping track
+        of it so that the spider is not considered idle until it has been
+        processed."""
+        assert self._slot is not None  # typing
+        slot = self._slot
+        try:
+            await self.scraper.start_itemproc_async(item, response=None)
+        finally:
+            self._start_items_in_progress -= 1
+            slot.nextcall.schedule()
 
     async def _start_request_processing(self) -> None:
         """Starts consuming Spider.start() output and sending scheduled
@@ -443,6 +457,8 @@ class ExecutionEngine:
         if self.downloader.active:  # downloader has pending requests
             return False
         if self._start is not None:  # not all start requests are handled
+            return False
+        if self._start_items_in_progress:  # start items still in pipelines
             return False
         return not self._slot.scheduler.has_pending_requests()
 
